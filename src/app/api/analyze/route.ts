@@ -33,17 +33,43 @@ export async function POST(request: NextRequest) {
     }
     debug.push("cache: miss");
 
-    // 2. Try Naver GraphQL API
+    // 2. Try Naver (GraphQL + HTML fallback)
     const [placeInfo, reviewData] = await Promise.all([
       fetchPlaceInfo(placeId),
       fetchReviews(placeId, 1, 50),
     ]);
     debug.push(
-      `naver: placeInfo=${placeInfo ? "ok" : "null"}, reviews=${reviewData?.reviews?.length ?? "null"}`
+      `naver: place=${placeInfo?.name ?? "null"}, reviews=${reviewData?.reviews?.length ?? "null"}`
     );
 
+    // If we have reviews, analyze them
     if (reviewData && reviewData.reviews.length > 0) {
       const result = analyzeReviews(reviewData.reviews, placeInfo, placeId);
+      await setCachedResult(placeId, result);
+      return NextResponse.json(result);
+    }
+
+    // If we have placeInfo but no reviews, return partial result
+    if (placeInfo) {
+      const result = {
+        restaurant: {
+          name: placeInfo.name,
+          placeId,
+          period: "최근 30일",
+        },
+        stats: {
+          totalReviews: placeInfo.visitorReviewCount || 0,
+          reviewChange: 0,
+          averageRating: placeInfo.visitorReviewScore || 0,
+          needResponse: 0,
+        },
+        categories: [],
+        complaints: [],
+        praises: [],
+        actionItems: [],
+        reviews: [],
+        isDemo: false,
+      };
       await setCachedResult(placeId, result);
       return NextResponse.json(result);
     }
@@ -77,12 +103,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(result);
     }
 
-    // 4. All sources failed — return debug info
+    // 4. All failed
     console.error("All sources failed:", debug);
     return NextResponse.json(
-      {
-        error: `리뷰 데이터를 가져올 수 없습니다. [${debug.join(" | ")}]`,
-      },
+      { error: `리뷰 데이터를 가져올 수 없습니다. [${debug.join(" | ")}]` },
       { status: 502 }
     );
   } catch (error) {
