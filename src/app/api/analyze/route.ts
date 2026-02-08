@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractPlaceId, fetchPlaceInfo, fetchReviews } from "@/lib/naver-api";
 import { analyzeReviews } from "@/lib/analyze";
-import { fetchNaverPlaceViaSerpApi } from "@/lib/serpapi";
+import { fetchNaverPlaceViaSerpApi, lastDebug as serpDebug } from "@/lib/serpapi";
 import { getCachedResult, setCachedResult } from "@/lib/cache";
 
 export async function POST(request: NextRequest) {
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     // 3. Try SerpApi
     debug.push(`serpapi_key: ${process.env.SERPAPI_API_KEY ? "set" : "MISSING"}`);
     const serpResult = await fetchNaverPlaceViaSerpApi(placeId);
-    debug.push(`serpapi: ${serpResult ? JSON.stringify(serpResult) : "null"}`);
+    debug.push(`serpapi: ${serpResult ? JSON.stringify(serpResult) : "null"} (${serpDebug})`);
 
     if (serpResult) {
       const result = {

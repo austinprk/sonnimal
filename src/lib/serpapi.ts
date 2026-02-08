@@ -6,14 +6,20 @@ export interface SerpApiPlaceResult {
   category?: string;
 }
 
+// Expose debug info for troubleshooting
+export let lastDebug = "";
+
 export async function fetchNaverPlaceViaSerpApi(
   placeId: string
 ): Promise<SerpApiPlaceResult | null> {
   const apiKey = process.env.SERPAPI_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    lastDebug = "no_api_key";
+    return null;
+  }
 
   try {
-    // Search using the full Naver Place URL so Naver shows the place card
+    // Search Naver with the place URL
     const searchUrl = new URL("https://serpapi.com/search.json");
     searchUrl.searchParams.set("engine", "naver");
     searchUrl.searchParams.set(
@@ -28,30 +34,26 @@ export async function fetchNaverPlaceViaSerpApi(
     });
 
     if (!res.ok) {
-      console.error("SerpApi HTTP error:", res.status);
+      lastDebug = `http_${res.status}`;
       return null;
     }
 
     const data = await res.json();
+
+    // Log top-level keys for debugging
+    const keys = Object.keys(data).filter(
+      (k) => k !== "search_metadata" && k !== "search_parameters"
+    );
+    lastDebug = `keys:[${keys.join(",")}]`;
+
+    // Try first result set
     const place = extractPlaceFromResults(data);
     if (place) return place;
 
-    // Fallback: try searching with just the place ID
-    const fallbackUrl = new URL("https://serpapi.com/search.json");
-    fallbackUrl.searchParams.set("engine", "naver");
-    fallbackUrl.searchParams.set("query", `네이버플레이스 ${placeId}`);
-    fallbackUrl.searchParams.set("where", "nexearch");
-    fallbackUrl.searchParams.set("api_key", apiKey);
-
-    const res2 = await fetch(fallbackUrl.toString(), {
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res2.ok) return null;
-
-    const data2 = await res2.json();
-    return extractPlaceFromResults(data2);
+    lastDebug += "|no_match_in_first";
+    return null;
   } catch (e) {
-    console.error("SerpApi error:", e);
+    lastDebug = `error:${e instanceof Error ? e.message : String(e)}`;
     return null;
   }
 }
@@ -97,7 +99,7 @@ function extractPlaceFromResults(
     };
   }
 
-  // Check organic results for place-related content
+  // Check organic results
   const organic = data.organic_results as
     | Record<string, unknown>[]
     | undefined;
@@ -108,9 +110,24 @@ function extractPlaceFromResults(
         return { name: item.title as string };
       }
     }
-    // Return first organic result title as last resort
     if (organic[0].title) {
       return { name: organic[0].title as string };
+    }
+  }
+
+  // Check any other array fields that might contain results
+  for (const key of Object.keys(data)) {
+    const val = data[key];
+    if (Array.isArray(val) && val.length > 0 && val[0]?.title) {
+      return { name: val[0].title as string };
+    }
+    if (
+      typeof val === "object" &&
+      val !== null &&
+      !Array.isArray(val) &&
+      (val as Record<string, unknown>).title
+    ) {
+      return { name: (val as Record<string, unknown>).title as string };
     }
   }
 
