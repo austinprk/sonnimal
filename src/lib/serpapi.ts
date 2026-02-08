@@ -46,6 +46,12 @@ export async function fetchNaverPlaceViaSerpApi(
     );
     lastDebug = `keys:[${keys.join(",")}]`;
 
+    // If SerpApi returned an error, capture it
+    if (data.error) {
+      lastDebug += `|err:${data.error}`;
+      return null;
+    }
+
     // Try first result set
     const place = extractPlaceFromResults(data);
     if (place) return place;
