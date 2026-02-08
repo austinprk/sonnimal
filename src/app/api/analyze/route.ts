@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractPlaceId, fetchPlaceInfo, fetchReviews } from "@/lib/naver-api";
-import { analyzeReviews, generateFallbackData } from "@/lib/analyze";
+import { analyzeReviews } from "@/lib/analyze";
 import { fetchNaverPlaceViaSerpApi } from "@/lib/serpapi";
 import { getCachedResult, setCachedResult } from "@/lib/cache";
 
@@ -24,13 +24,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Check Vercel KV cache first
+    // 1. Check cache
     const cached = await getCachedResult(placeId);
     if (cached) {
       return NextResponse.json(cached);
     }
 
-    // 2. Try Naver GraphQL API directly
+    // 2. Try Naver GraphQL API
     const [placeInfo, reviewData] = await Promise.all([
       fetchPlaceInfo(placeId),
       fetchReviews(placeId, 1, 50),
@@ -42,23 +42,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(result);
     }
 
-    // 3. Try SerpApi as secondary source
+    // 3. Try SerpApi
     const serpResult = await fetchNaverPlaceViaSerpApi(placeId);
     if (serpResult) {
-      const fallback = generateFallbackData(placeId);
-      // Enrich fallback with real data from SerpApi
-      fallback.restaurant.name = serpResult.name;
-      if (serpResult.rating) fallback.stats.averageRating = serpResult.rating;
-      if (serpResult.reviewCount)
-        fallback.stats.totalReviews = serpResult.reviewCount;
-      fallback.isDemo = false;
-      await setCachedResult(placeId, fallback);
-      return NextResponse.json(fallback);
+      // SerpApi gave us place info but no individual reviews
+      // Return what we have
+      const result = {
+        restaurant: {
+          name: serpResult.name,
+          placeId,
+          period: "최근 30일",
+        },
+        stats: {
+          totalReviews: serpResult.reviewCount || 0,
+          reviewChange: 0,
+          averageRating: serpResult.rating || 0,
+          needResponse: 0,
+        },
+        categories: [],
+        complaints: [],
+        praises: [],
+        actionItems: [],
+        reviews: [],
+        isDemo: false,
+      };
+      await setCachedResult(placeId, result);
+      return NextResponse.json(result);
     }
 
-    // 4. Fallback: deterministic demo data
-    const fallbackResult = generateFallbackData(placeId);
-    return NextResponse.json(fallbackResult);
+    // 4. All sources failed
+    return NextResponse.json(
+      {
+        error:
+          "리뷰 데이터를 가져올 수 없습니다. SERPAPI_API_KEY가 설정되어 있는지 확인해주세요.",
+      },
+      { status: 502 }
+    );
   } catch (error) {
     console.error("Analysis error:", error);
     return NextResponse.json(

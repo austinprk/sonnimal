@@ -1,31 +1,23 @@
+import { Redis } from "@upstash/redis";
 import type { AnalysisResult } from "./types";
 
-const KV_PREFIX = "sonnimal:analysis:";
-const TTL_SECONDS = 60 * 60 * 24; // 24 hours
+const PREFIX = "sonnimal:";
+const TTL = 60 * 60 * 24; // 24h
 
-let kvAvailable: boolean | null = null;
-
-async function getKV() {
-  if (kvAvailable === false) return null;
-  try {
-    const { kv } = await import("@vercel/kv");
-    kvAvailable = true;
-    return kv;
-  } catch {
-    kvAvailable = false;
-    return null;
-  }
+function getRedis(): Redis | null {
+  const url = process.env.KV_REST_API_URL;
+  const token = process.env.KV_REST_API_TOKEN;
+  if (!url || !token) return null;
+  return new Redis({ url, token });
 }
 
 export async function getCachedResult(
   placeId: string
 ): Promise<AnalysisResult | null> {
-  const kv = await getKV();
-  if (!kv) return null;
-
+  const redis = getRedis();
+  if (!redis) return null;
   try {
-    const cached = await kv.get<AnalysisResult>(KV_PREFIX + placeId);
-    return cached;
+    return await redis.get<AnalysisResult>(PREFIX + placeId);
   } catch {
     return null;
   }
@@ -35,12 +27,11 @@ export async function setCachedResult(
   placeId: string,
   data: AnalysisResult
 ): Promise<void> {
-  const kv = await getKV();
-  if (!kv) return;
-
+  const redis = getRedis();
+  if (!redis) return;
   try {
-    await kv.set(KV_PREFIX + placeId, data, { ex: TTL_SECONDS });
+    await redis.set(PREFIX + placeId, data, { ex: TTL });
   } catch {
-    // Cache write failure is non-critical
+    // non-critical
   }
 }
