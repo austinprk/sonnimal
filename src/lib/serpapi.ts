@@ -6,7 +6,6 @@ export interface SerpApiPlaceResult {
   category?: string;
 }
 
-// Expose debug info for troubleshooting
 export let lastDebug = "";
 
 export async function fetchNaverPlaceViaSerpApi(
@@ -19,14 +18,15 @@ export async function fetchNaverPlaceViaSerpApi(
   }
 
   try {
-    // Search Naver with the place URL
+    // Use Google to find the Naver Place page — Google indexes these pages
     const searchUrl = new URL("https://serpapi.com/search.json");
-    searchUrl.searchParams.set("engine", "naver");
+    searchUrl.searchParams.set("engine", "google");
     searchUrl.searchParams.set(
-      "query",
-      `m.place.naver.com/restaurant/${placeId}`
+      "q",
+      `site:place.naver.com ${placeId}`
     );
-    searchUrl.searchParams.set("where", "nexearch");
+    searchUrl.searchParams.set("hl", "ko");
+    searchUrl.searchParams.set("gl", "kr");
     searchUrl.searchParams.set("api_key", apiKey);
 
     const res = await fetch(searchUrl.toString(), {
@@ -40,102 +40,62 @@ export async function fetchNaverPlaceViaSerpApi(
 
     const data = await res.json();
 
-    // Log top-level keys for debugging
-    const keys = Object.keys(data).filter(
-      (k) => k !== "search_metadata" && k !== "search_parameters"
-    );
-    lastDebug = `keys:[${keys.join(",")}]`;
-
-    // If SerpApi returned an error, capture it
     if (data.error) {
-      lastDebug += `|err:${data.error}`;
+      lastDebug = `err:${data.error}`;
       return null;
     }
 
-    // Try first result set
-    const place = extractPlaceFromResults(data);
-    if (place) return place;
+    const keys = Object.keys(data).filter(
+      (k) => k !== "search_metadata" && k !== "search_parameters" && k !== "search_information"
+    );
+    lastDebug = `keys:[${keys.join(",")}]`;
 
-    lastDebug += "|no_match_in_first";
+    // Check knowledge_graph (Google sometimes shows rich data)
+    const kg = data.knowledge_graph as Record<string, unknown> | undefined;
+    if (kg?.title) {
+      lastDebug += "|src:kg";
+      return {
+        name: kg.title as string,
+        rating: kg.rating as number | undefined,
+        reviewCount: kg.reviews as number | undefined,
+        address: kg.address as string | undefined,
+        category: kg.type as string | undefined,
+      };
+    }
+
+    // Check organic results for the Naver Place page
+    const organic = data.organic_results as Record<string, unknown>[] | undefined;
+    if (organic && organic.length > 0) {
+      for (const item of organic) {
+        const link = item.link as string | undefined;
+        const title = item.title as string | undefined;
+        if (link?.includes("place.naver.com") && title) {
+          // Clean up title — remove " : 네이버" suffix etc.
+          const cleanName = title
+            .replace(/\s*[:·\-|]\s*네이버.*$/i, "")
+            .replace(/\s*-\s*지도.*$/i, "")
+            .trim();
+          lastDebug += `|src:organic`;
+          return { name: cleanName || title };
+        }
+      }
+
+      // Use first result even if not place.naver.com
+      const first = organic[0];
+      if (first.title) {
+        const title = first.title as string;
+        const cleanName = title
+          .replace(/\s*[:·\-|]\s*네이버.*$/i, "")
+          .trim();
+        lastDebug += `|src:first_organic`;
+        return { name: cleanName || title };
+      }
+    }
+
+    lastDebug += "|no_results";
     return null;
   } catch (e) {
     lastDebug = `error:${e instanceof Error ? e.message : String(e)}`;
     return null;
   }
-}
-
-function extractPlaceFromResults(
-  data: Record<string, unknown>
-): SerpApiPlaceResult | null {
-  // Check knowledge_graph
-  const kg = data.knowledge_graph as Record<string, unknown> | undefined;
-  if (kg?.title) {
-    return {
-      name: kg.title as string,
-      rating: kg.rating as number | undefined,
-      reviewCount: kg.review_count as number | undefined,
-      address: kg.address as string | undefined,
-      category: kg.category as string | undefined,
-    };
-  }
-
-  // Check places_results
-  const places = data.places_results as Record<string, unknown>[] | undefined;
-  if (places && places.length > 0) {
-    const p = places[0];
-    return {
-      name: (p.title || p.name) as string,
-      rating: p.rating as number | undefined,
-      reviewCount: (p.review_count || p.reviews) as number | undefined,
-      address: p.address as string | undefined,
-      category: p.category as string | undefined,
-    };
-  }
-
-  // Check local_results
-  const locals = data.local_results as Record<string, unknown>[] | undefined;
-  if (locals && locals.length > 0) {
-    const l = locals[0];
-    return {
-      name: (l.title || l.name) as string,
-      rating: l.rating as number | undefined,
-      reviewCount: l.review_count as number | undefined,
-      address: l.address as string | undefined,
-      category: l.category as string | undefined,
-    };
-  }
-
-  // Check organic results
-  const organic = data.organic_results as
-    | Record<string, unknown>[]
-    | undefined;
-  if (organic && organic.length > 0) {
-    for (const item of organic) {
-      const link = item.link as string | undefined;
-      if (link?.includes("place.naver.com") && item.title) {
-        return { name: item.title as string };
-      }
-    }
-    if (organic[0].title) {
-      return { name: organic[0].title as string };
-    }
-  }
-
-  // Check any other array fields that might contain results
-  for (const key of Object.keys(data)) {
-    const val = data[key];
-    if (Array.isArray(val) && val.length > 0 && val[0]?.title) {
-      return { name: val[0].title as string };
-    }
-    if (
-      typeof val === "object" &&
-      val !== null &&
-      !Array.isArray(val) &&
-      (val as Record<string, unknown>).title
-    ) {
-      return { name: (val as Record<string, unknown>).title as string };
-    }
-  }
-
-  return null;
 }
