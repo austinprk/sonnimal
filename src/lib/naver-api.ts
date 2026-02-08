@@ -46,6 +46,7 @@ export function extractPlaceId(url: string): string | null {
 export async function fetchPlaceInfo(
   placeId: string
 ): Promise<NaverPlaceInfo | null> {
+  // Try GraphQL API first
   try {
     const query = [
       {
@@ -69,21 +70,60 @@ export async function fetchPlaceInfo(
       signal: AbortSignal.timeout(5000),
     });
 
+    if (res.ok) {
+      const data = await res.json();
+      const place = data?.[0]?.data?.place;
+      if (place) {
+        return {
+          name: place.name,
+          category: place.category,
+          visitorReviewCount: place.visitorReviewCount,
+          visitorReviewScore: place.visitorReviewScore,
+        };
+      }
+    }
+  } catch {
+    // Continue to HTML fallback
+  }
+
+  // Fallback: fetch the page HTML and extract name from <title>
+  try {
+    const pageUrl = `https://m.place.naver.com/restaurant/${placeId}/home`;
+    const res = await fetch(pageUrl, {
+      headers: {
+        "User-Agent": HEADERS["User-Agent"],
+        Accept: "text/html",
+        "Accept-Language": "ko-KR,ko;q=0.9",
+      },
+      signal: AbortSignal.timeout(5000),
+      redirect: "follow",
+    });
+
     if (!res.ok) return null;
 
-    const data = await res.json();
-    const place = data?.[0]?.data?.place;
-    if (!place) return null;
+    const html = await res.text();
 
-    return {
-      name: place.name,
-      category: place.category,
-      visitorReviewCount: place.visitorReviewCount,
-      visitorReviewScore: place.visitorReviewScore,
-    };
+    // Extract name from <title> or og:title
+    const ogMatch = html.match(
+      /property="og:title"\s+content="([^"]+)"/
+    ) || html.match(
+      /content="([^"]+)"\s+property="og:title"/
+    );
+    if (ogMatch) {
+      const name = ogMatch[1].replace(/\s*[-|:]\s*네이버.*$/i, "").trim();
+      return { name, category: "", visitorReviewCount: 0, visitorReviewScore: 0 };
+    }
+
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/);
+    if (titleMatch) {
+      const name = titleMatch[1].replace(/\s*[-|:]\s*네이버.*$/i, "").trim();
+      return { name, category: "", visitorReviewCount: 0, visitorReviewScore: 0 };
+    }
   } catch {
-    return null;
+    // Both methods failed
   }
+
+  return null;
 }
 
 export async function fetchReviews(

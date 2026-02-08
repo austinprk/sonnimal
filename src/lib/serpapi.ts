@@ -23,7 +23,7 @@ export async function fetchNaverPlaceViaSerpApi(
     searchUrl.searchParams.set("engine", "google");
     searchUrl.searchParams.set(
       "q",
-      `site:place.naver.com ${placeId}`
+      `"${placeId}" 네이버 플레이스`
     );
     searchUrl.searchParams.set("hl", "ko");
     searchUrl.searchParams.set("gl", "kr");
