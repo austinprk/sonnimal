@@ -4,35 +4,43 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import { demoData } from "@/lib/demo-data";
+import type { AnalysisResult, RankedItem, ReviewWithReply } from "@/lib/types";
 
-function StatsCards() {
-  const { stats } = demoData;
+function StatsCards({ stats }: { stats: AnalysisResult["stats"] }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
         <p className="text-gray-500 text-sm font-medium mb-2">전체 리뷰</p>
-        <p className="text-3xl font-bold text-gray-900">{stats.totalReviews}개</p>
+        <p className="text-3xl font-bold text-gray-900">
+          {stats.totalReviews}개
+        </p>
         <p className="text-green-600 text-sm mt-2">
           ↑ {stats.reviewChange}% 지난달 대비
         </p>
       </div>
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
         <p className="text-gray-500 text-sm font-medium mb-2">평균 별점</p>
-        <p className="text-3xl font-bold text-gray-900">{stats.averageRating}</p>
+        <p className="text-3xl font-bold text-gray-900">
+          {stats.averageRating}
+        </p>
         <p className="text-gray-400 text-sm mt-2">네이버 플레이스 기준</p>
       </div>
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
         <p className="text-gray-500 text-sm font-medium mb-2">답변 필요</p>
-        <p className="text-3xl font-bold text-red-600">{stats.needResponse}개</p>
+        <p className="text-3xl font-bold text-red-600">
+          {stats.needResponse}개
+        </p>
         <p className="text-red-600 text-sm mt-2">악성 리뷰 답글 미작성</p>
       </div>
     </div>
   );
 }
 
-function CategoryPerformance() {
-  const { categories } = demoData;
+function CategoryPerformance({
+  categories,
+}: {
+  categories: AnalysisResult["categories"];
+}) {
   return (
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-8">
       <h4 className="text-lg font-bold text-gray-900 mb-6">카테고리별 평가</h4>
@@ -70,7 +78,7 @@ function Top3Section({
   title: string;
   icon: string;
   iconBg: string;
-  items: typeof demoData.complaints;
+  items: RankedItem[];
 }) {
   return (
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
@@ -89,7 +97,9 @@ function Top3Section({
             className={`border-l-4 ${item.borderColor} pl-4 py-2`}
           >
             <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-gray-900">{item.rank}위</span>
+              <span className="font-semibold text-gray-900">
+                {item.rank}위
+              </span>
               <span
                 className={`inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium ${item.badgeBg} ${item.badgeText}`}
               >
@@ -104,8 +114,11 @@ function Top3Section({
   );
 }
 
-function ActionItems() {
-  const { actionItems } = demoData;
+function ActionItemsSection({
+  actionItems,
+}: {
+  actionItems: AnalysisResult["actionItems"];
+}) {
   return (
     <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-8 mt-8 border-2 border-indigo-200">
       <div className="flex items-center mb-6">
@@ -148,8 +161,7 @@ function ActionItems() {
   );
 }
 
-function ReviewResponses() {
-  const { reviews } = demoData;
+function ReviewResponses({ reviews }: { reviews: ReviewWithReply[] }) {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [visibleReplies, setVisibleReplies] = useState<Set<number>>(
     new Set([0])
@@ -173,9 +185,13 @@ function ReviewResponses() {
     setTimeout(() => setCopiedIdx(null), 2000);
   };
 
+  if (reviews.length === 0) return null;
+
   return (
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mt-8">
-      <h4 className="text-lg font-bold text-gray-900 mb-4">답변 필요한 리뷰</h4>
+      <h4 className="text-lg font-bold text-gray-900 mb-4">
+        답변 필요한 리뷰
+      </h4>
       <div className="space-y-4">
         {reviews.map((review, idx) => (
           <div key={idx}>
@@ -231,11 +247,42 @@ function DashboardContent() {
   const searchParams = useSearchParams();
   const url = searchParams.get("url");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [data, setData] = useState<AnalysisResult | null>(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 2500);
-    return () => clearTimeout(timer);
-  }, []);
+    async function fetchAnalysis() {
+      if (!url) {
+        // No URL provided — use default demo
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: decodeURIComponent(url) }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          setError(errData.error || "분석 중 오류가 발생했습니다.");
+          setLoading(false);
+          return;
+        }
+
+        const result: AnalysisResult = await res.json();
+        setData(result);
+      } catch {
+        setError("서버에 연결할 수 없습니다. 다시 시도해주세요.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchAnalysis();
+  }, [url]);
 
   if (loading) {
     return (
@@ -260,6 +307,49 @@ function DashboardContent() {
     );
   }
 
+  if (error) {
+    return (
+      <section className="py-20 bg-white min-h-screen">
+        <div className="max-w-md mx-auto px-4 text-center">
+          <div className="text-5xl mb-4">😥</div>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">
+            분석에 실패했어요
+          </h3>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <a
+            href="/"
+            className="inline-block gradient-bg text-white px-8 py-3 rounded-xl font-semibold hover:opacity-90 transition"
+          >
+            다시 시도하기
+          </a>
+        </div>
+      </section>
+    );
+  }
+
+  if (!data) {
+    // Redirect to home if no data
+    return (
+      <section className="py-20 bg-white min-h-screen">
+        <div className="max-w-md mx-auto px-4 text-center">
+          <h3 className="text-xl font-bold text-gray-900 mb-2">
+            분석할 URL을 입력해주세요
+          </h3>
+          <p className="text-gray-600 mb-6">
+            홈페이지에서 네이버 플레이스 URL을 입력하면 분석 결과를 확인할 수
+            있어요.
+          </p>
+          <a
+            href="/"
+            className="inline-block gradient-bg text-white px-8 py-3 rounded-xl font-semibold hover:opacity-90 transition"
+          >
+            홈으로 이동
+          </a>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="py-10 bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -269,10 +359,10 @@ function DashboardContent() {
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <h3 className="text-2xl font-bold text-gray-900">
-                  맛집 &apos;{demoData.restaurant.name}&apos;
+                  {data.restaurant.name}
                 </h3>
                 <p className="text-gray-500 mt-1">
-                  {demoData.restaurant.period} 리뷰 분석 결과
+                  {data.restaurant.period} 리뷰 분석 결과
                 </p>
               </div>
               <div className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-700">
@@ -282,38 +372,41 @@ function DashboardContent() {
           </div>
 
           <div className="p-8">
-            <StatsCards />
-            <CategoryPerformance />
+            <StatsCards stats={data.stats} />
+            <CategoryPerformance categories={data.categories} />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <Top3Section
                 title="불만 TOP 3"
                 icon="⚠️"
                 iconBg="bg-red-100"
-                items={demoData.complaints}
+                items={data.complaints}
               />
               <Top3Section
                 title="칭찬 TOP 3"
                 icon="✨"
                 iconBg="bg-green-100"
-                items={demoData.praises}
+                items={data.praises}
               />
             </div>
 
-            <ActionItems />
-            <ReviewResponses />
+            <ActionItemsSection actionItems={data.actionItems} />
+            <ReviewResponses reviews={data.reviews} />
           </div>
         </div>
 
-        {/* Demo notice */}
-        <div className="mt-8 bg-indigo-50 border border-indigo-200 rounded-xl p-6 text-center">
-          <p className="text-indigo-800 font-medium">
-            현재 데모 데이터를 표시하고 있습니다
-          </p>
-          <p className="text-indigo-600 text-sm mt-1">
-            실제 서비스에서는 입력한 URL의 리뷰를 크롤링하여 분석합니다
-          </p>
-        </div>
+        {/* Data source notice */}
+        {data.isDemo && (
+          <div className="mt-8 bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+            <p className="text-amber-800 font-medium">
+              네이버 API 연동 전이라 샘플 분석 데이터를 표시하고 있습니다
+            </p>
+            <p className="text-amber-600 text-sm mt-1">
+              Place ID: {data.restaurant.placeId} · 실제 서비스에서는 리뷰를
+              크롤링하여 분석합니다
+            </p>
+          </div>
+        )}
       </div>
     </section>
   );
