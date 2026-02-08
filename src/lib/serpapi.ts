@@ -4,7 +4,6 @@ export interface SerpApiPlaceResult {
   reviewCount?: number;
   address?: string;
   category?: string;
-  reviews?: { text: string; rating?: number; author?: string; date?: string }[];
 }
 
 export async function fetchNaverPlaceViaSerpApi(
@@ -14,32 +13,52 @@ export async function fetchNaverPlaceViaSerpApi(
   if (!apiKey) return null;
 
   try {
-    // Search Naver for the place ID to get restaurant info
+    // Search using the full Naver Place URL so Naver shows the place card
     const searchUrl = new URL("https://serpapi.com/search.json");
     searchUrl.searchParams.set("engine", "naver");
-    searchUrl.searchParams.set("query", placeId);
+    searchUrl.searchParams.set(
+      "query",
+      `m.place.naver.com/restaurant/${placeId}`
+    );
     searchUrl.searchParams.set("where", "nexearch");
     searchUrl.searchParams.set("api_key", apiKey);
 
     const res = await fetch(searchUrl.toString(), {
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) return null;
+
+    if (!res.ok) {
+      console.error("SerpApi HTTP error:", res.status);
+      return null;
+    }
 
     const data = await res.json();
-
-    // Extract place info from various result types
     const place = extractPlaceFromResults(data);
-    return place;
-  } catch {
+    if (place) return place;
+
+    // Fallback: try searching with just the place ID
+    const fallbackUrl = new URL("https://serpapi.com/search.json");
+    fallbackUrl.searchParams.set("engine", "naver");
+    fallbackUrl.searchParams.set("query", `네이버플레이스 ${placeId}`);
+    fallbackUrl.searchParams.set("where", "nexearch");
+    fallbackUrl.searchParams.set("api_key", apiKey);
+
+    const res2 = await fetch(fallbackUrl.toString(), {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res2.ok) return null;
+
+    const data2 = await res2.json();
+    return extractPlaceFromResults(data2);
+  } catch (e) {
+    console.error("SerpApi error:", e);
     return null;
   }
 }
 
-function extractPlaceFromResults(data: Record<string, unknown>): SerpApiPlaceResult | null {
-  // SerpApi Naver returns different result structures
-  // Try to find place/local results
-
+function extractPlaceFromResults(
+  data: Record<string, unknown>
+): SerpApiPlaceResult | null {
   // Check knowledge_graph
   const kg = data.knowledge_graph as Record<string, unknown> | undefined;
   if (kg?.title) {
@@ -79,13 +98,19 @@ function extractPlaceFromResults(data: Record<string, unknown>): SerpApiPlaceRes
   }
 
   // Check organic results for place-related content
-  const organic = data.organic_results as Record<string, unknown>[] | undefined;
+  const organic = data.organic_results as
+    | Record<string, unknown>[]
+    | undefined;
   if (organic && organic.length > 0) {
-    const first = organic[0];
-    if (first.title && (first.link as string)?.includes("place.naver.com")) {
-      return {
-        name: first.title as string,
-      };
+    for (const item of organic) {
+      const link = item.link as string | undefined;
+      if (link?.includes("place.naver.com") && item.title) {
+        return { name: item.title as string };
+      }
+    }
+    // Return first organic result title as last resort
+    if (organic[0].title) {
+      return { name: organic[0].title as string };
     }
   }
 
