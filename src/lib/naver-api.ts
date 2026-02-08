@@ -102,7 +102,7 @@ export async function fetchPlaceInfo(
 
     // Try __NEXT_DATA__ first for rich data
     const nextData = extractNextData(html);
-    if (nextData) {
+    if (nextData?.placeInfo) {
       return nextData.placeInfo;
     }
 
